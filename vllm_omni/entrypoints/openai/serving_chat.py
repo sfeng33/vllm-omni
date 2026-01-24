@@ -1963,19 +1963,79 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
 
             # Convert images to base64 content
             image_contents: list[dict[str, Any]] = []
-            for img in images:
-                with BytesIO() as buffer:
-                    img.save(buffer, format="PNG")
-                    img_bytes = buffer.getvalue()
-                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-                image_contents.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{img_base64}",
-                        },
-                    }
-                )
+
+            # Handle video (multiple frames)
+            if gen_kwargs.get("num_frames", 1) > 1:
+                import numpy as np
+                import torch
+                from diffusers.utils import export_to_video
+                import tempfile
+
+                # Get frames - could be tensor or in images list
+                frames = images[0] if images else None
+                logger.info(f"[Flora DEBUG] frames type: {type(frames)}")
+
+                if frames is not None:
+                    # Process tensor like text_to_video.py
+                    if isinstance(frames, torch.Tensor):
+                        video_tensor = frames.detach().cpu()
+                        if video_tensor.dim() == 5:
+                            # [B, C, F, H, W] or [B, F, H, W, C]
+                            if video_tensor.shape[1] in (3, 4):
+                                video_tensor = video_tensor[0].permute(1, 2, 3, 0)
+                            else:
+                                video_tensor = video_tensor[0]
+                        elif video_tensor.dim() == 4 and video_tensor.shape[0] in (3, 4):
+                            video_tensor = video_tensor.permute(1, 2, 3, 0)
+                        # If float, assume [-1,1] and normalize to [0,1]
+                        if video_tensor.is_floating_point():
+                            video_tensor = video_tensor.clamp(-1, 1) * 0.5 + 0.5
+                        video_array = video_tensor.float().numpy()
+                    else:
+                        video_array = frames
+                        if hasattr(video_array, "shape") and video_array.ndim == 5:
+                            video_array = video_array[0]
+
+                    # Convert 4D array to list for export_to_video
+                    if isinstance(video_array, np.ndarray) and video_array.ndim == 4:
+                        video_array = list(video_array)
+
+                    # Export to temp file then read bytes
+                    fps = gen_kwargs.get("fps", 24)
+                    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                        tmp_path = tmp.name
+                    try:
+                        export_to_video(video_array, tmp_path, fps=fps)
+                        with open(tmp_path, "rb") as f:
+                            video_bytes = f.read()
+                    finally:
+                        import os
+                        os.unlink(tmp_path)
+
+                    video_base64 = base64.b64encode(video_bytes).decode("utf-8")
+                    image_contents.append(
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": f"data:video/mp4;base64,{video_base64}",
+                            },
+                        }
+                    )
+            else:
+                # Handle single images
+                for img in images:
+                    with BytesIO() as buffer:
+                        img.save(buffer, format="PNG")
+                        img_bytes = buffer.getvalue()
+                    img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+                    image_contents.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{img_base64}",
+                            },
+                        }
+                    )
 
             # Build response
             if not image_contents:
