@@ -85,11 +85,15 @@ from vllm_omni.entrypoints.openai.protocol.images import (
     ImageGenerationRequest,
     ImageGenerationResponse,
 )
+from vllm_omni.entrypoints.openai.protocol.video import (
+    OpenAICreateVideoRequest,
+)
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
 from vllm_omni.entrypoints.openai.serving_speech import OmniOpenAIServingSpeech
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams, OmniSamplingParams, OmniTextPrompt
 from vllm_omni.lora.request import LoRARequest
 from vllm_omni.lora.utils import stable_lora_int_id
+from vllm_omni.entrypoints.openai.serving_video import OmniOpenAIServingVideo
 
 logger = init_logger(__name__)
 router = APIRouter()
@@ -406,6 +410,8 @@ async def omni_init_app_state(
             model_name=model_name,
         )
 
+        state.openai_serving_video = OmniOpenAIServingVideo.create()
+
         state.enable_server_load_tracking = getattr(args, "enable_server_load_tracking", False)
         state.server_load_metrics = 0
         logger.info("Pure diffusion API server initialized for model: %s", model_name)
@@ -694,6 +700,10 @@ def Omnichat(request: Request) -> OmniOpenAIServingChat | None:
 
 def Omnispeech(request: Request) -> OmniOpenAIServingSpeech | None:
     return request.app.state.openai_serving_speech
+
+
+def Omnivideo(request: Request) -> OmniOpenAIServingVideo | None:
+    return request.app.state.openai_serving_video
 
 
 @router.post(
@@ -1453,3 +1463,26 @@ def apply_stage_default_sampling_params(
             for param_name, param_value in stage_defaults.items():
                 if hasattr(sampling_params, param_name):
                     setattr(sampling_params, param_name, param_value)
+
+
+@router.post(
+    "/v1/videos",
+    dependencies=[Depends(validate_json_request)],
+    responses={
+        HTTPStatus.OK.value: {"content": {"application/json": {}}},
+        HTTPStatus.BAD_REQUEST.value: {"model": ErrorResponse},
+        HTTPStatus.SERVICE_UNAVAILABLE.value: {"model": ErrorResponse},
+        HTTPStatus.INTERNAL_SERVER_ERROR.value: {"model": ErrorResponse},
+    },
+)
+async def create_video(request: OpenAICreateVideoRequest, raw_request: Request) -> JSONResponse:
+    handler = Omnivideo(raw_request)
+    if handler is None:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+            detail="The model does not support Video API"
+        )
+    try:
+        return await handler.create_video(request, raw_request)
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=str(e)) from e
