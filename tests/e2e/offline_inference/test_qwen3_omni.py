@@ -14,14 +14,15 @@ from pathlib import Path
 import pytest
 from vllm.assets.video import VideoAsset
 
-from vllm_omni.utils import is_rocm
+from tests.utils import hardware_test
+from vllm_omni.platforms import current_omni_platform
 
 from .conftest import OmniRunner
 
 models = ["Qwen/Qwen3-Omni-30B-A3B-Instruct"]
 
 # CI stage config for 2xH100-80G GPUs or AMD GPU MI325
-if is_rocm():
+if current_omni_platform.is_rocm():
     # ROCm stage config optimized for MI325 GPU
     stage_configs = [str(Path(__file__).parent / "stage_configs" / "rocm" / "qwen3_omni_ci.yaml")]
 else:
@@ -31,6 +32,9 @@ else:
 test_params = [(model, stage_config) for model in models for stage_config in stage_configs]
 
 
+@pytest.mark.core_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("test_config", test_params)
 def test_video_to_audio(omni_runner: type[OmniRunner], test_config) -> None:
     """Test processing video, generating audio output."""
@@ -75,6 +79,6 @@ def test_video_to_audio(omni_runner: type[OmniRunner], test_config) -> None:
         assert len(audio_output.request_output) > 0
 
         # Verify audio tensor exists and has content
-        audio_tensor = audio_output.request_output[0].multimodal_output["audio"]
+        audio_tensor = audio_output.request_output[0].outputs[0].multimodal_output["audio"]
         assert audio_tensor is not None
         assert audio_tensor.numel() > 0

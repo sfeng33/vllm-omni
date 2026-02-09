@@ -85,10 +85,20 @@ _DIFFUSION_MODELS = {
         "pipeline_sd3",
         "StableDiffusion3Pipeline",
     ),
+    "HunyuanImage3ForCausalMM": (
+        "hunyuan_image_3",
+        "pipeline_hunyuan_image_3",
+        "HunyuanImage3Pipeline",
+    ),
     "Flux2KleinPipeline": (
         "flux2_klein",
         "pipeline_flux2_klein",
         "Flux2KleinPipeline",
+    ),
+    "FluxPipeline": (
+        "flux",
+        "pipeline_flux",
+        "FluxPipeline",
     ),
 }
 
@@ -227,6 +237,7 @@ _DIFFUSION_POST_PROCESS_FUNCS = {
     "LongCatImageEditPipeline": "get_longcat_image_post_process_func",
     "StableDiffusion3Pipeline": "get_sd3_image_post_process_func",
     "Flux2KleinPipeline": "get_flux2_klein_post_process_func",
+    "FluxPipeline": "get_flux_post_process_func",
 }
 
 _DIFFUSION_PRE_PROCESS_FUNCS = {

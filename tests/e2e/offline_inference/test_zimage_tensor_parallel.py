@@ -12,16 +12,18 @@ import torch
 from PIL import Image
 from vllm.distributed.parallel_state import cleanup_dist_env_and_memory
 
+from tests.utils import GPUMemoryMonitor, hardware_test
+from vllm_omni import Omni
+from vllm_omni.diffusion.data import DiffusionParallelConfig
+from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+from vllm_omni.outputs import OmniRequestOutput
+from vllm_omni.platforms import current_omni_platform
+
 # ruff: noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.utils import GPUMemoryMonitor
-from vllm_omni import Omni
-from vllm_omni.diffusion.data import DiffusionParallelConfig
-from vllm_omni.outputs import OmniRequestOutput
-from vllm_omni.utils.platform_utils import is_npu, is_rocm
 
 # os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "1"
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -90,12 +92,14 @@ def _run_zimage_generate(
         num_requests = 4  # 1 warmup + 3 timed
         gen = m.generate(
             [PROMPT] * num_requests,
-            height=height,
-            width=width,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=0.0,
-            seed=seed,
-            num_outputs_per_prompt=1,
+            OmniDiffusionSamplingParams(
+                height=height,
+                width=width,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=0.0,
+                seed=seed,
+                num_outputs_per_prompt=1,
+            ),
             py_generator=True,
         )
 
@@ -123,9 +127,12 @@ def _run_zimage_generate(
         cleanup_dist_env_and_memory()
 
 
-@pytest.mark.integration
+@pytest.mark.core_model
+@pytest.mark.diffusion
+@pytest.mark.parallel
+@hardware_test(res={"cuda": "L4", "rocm": "MI325"}, num_cards={"cuda": 4, "rocm": 2})
 def test_zimage_tensor_parallel_tp2(tmp_path: Path):
-    if is_npu() or is_rocm():
+    if current_omni_platform.is_npu() or current_omni_platform.is_rocm():
         pytest.skip("Z-Image TP e2e test is only supported on CUDA for now.")
     if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
         pytest.skip("Z-Image TP=2 requires >= 2 CUDA devices.")
